@@ -5,6 +5,8 @@ English Introduction
 A lightweight, clean and easy-to-use visualization management tool for Gitee repositories. No command line required, with a pure graphical interface. It supports browsing, uploading, downloading, editing, deleting repository files, and encrypted token storage. Ideal for non-professional developers and individual developers to quickly manage Gitee code repositories.
 https://gitee.com/api/v5/swagger
 
+<img src="image/GiteeMiniMan.png" alt="GiteeMiniMan 截图" width="500">
+
 🌟 Project Introduction
 
 GiteeMiniMan is a Gitee desktop client developed with Python + Tkinter, focusing on being lightweight and minimalist. It solves the problems of complicated command-line operations and bloated official clients.
