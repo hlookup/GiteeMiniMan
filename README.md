@@ -50,6 +50,12 @@ Install dependencies:
 pip install requests cryptography
 
 
+🚀 GiteeMiniMan Basic Instructions
+Download GiteeMiniMan.py, run it in a Python environment, or package it into an EXE file for direct execution. Make sure to install required dependencies.
+Open the Gitee website → Personal Settings → Security Settings → Private Token, and generate a token with repo permissions.
+Paste the token and repository URL into the program input box, then click Load Repository to start using.
+
+
 中文说明
 
 GiteeMiniMan - Gitee 迷你仓库管理器
@@ -101,7 +107,7 @@ txt、md、yaml、yml、xml、json、ini、py、sh、bat、html、css、js、vue
 
 pip install requests cryptography
 
-二、基本操作说明
+🚀 基本操作说明
 
 1. 下载GiteeMiniMan.py，在python环境运行，或者直接打包exe后运行。注意安装依赖：pip install requests cryptography
 
