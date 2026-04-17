@@ -225,7 +225,12 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
         patterns = [r"gitee\.com/([^/]+)/([^/?#]+)", r"gitee\.com/api/v5/repos/([^/]+)/([^/]+)"]
         for p in patterns:
             match = re.search(p, url)
-            if match: return match.group(1), match.group(2)
+            if match:
+                owner = match.group(1)
+                repo = match.group(2)
+                if repo.endswith(".git"):
+                    repo = repo[:-4]
+                return owner, repo
         return None, None
 
     def load_repo(self):
@@ -273,7 +278,17 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
                 node = self.tree.insert(parent_node, "end", text=name, values=("☐", f"{size} B"))
                 self.path_map[node] = (full_path, typ)
                 if typ == "dir": self.tree.insert(node, "end")
-        except Exception as e: pass
+        except Exception as e:
+            if parent_node == "":
+                error_msg = str(e)
+                try:
+                    if hasattr(e, 'response') and e.response is not None:
+                        error_detail = e.response.json()
+                        if isinstance(error_detail, dict):
+                            error_msg = error_detail.get('message', error_msg)
+                except:
+                    pass
+                messagebox.showerror("加载失败", f"无法加载仓库内容：\n{error_msg}")
 
     def on_folder_open(self, event):
         node = self.tree.focus()
