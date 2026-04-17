@@ -5,6 +5,8 @@ import re
 import requests
 import base64
 import json
+import zipfile
+import tempfile
 from cryptography.fernet import Fernet
 
 # ==== 配置文件 ==============
@@ -48,7 +50,7 @@ class GiteeTreeManager:
     def __init__(self, root):
         self.root = root
         self.root.title("GiteeMiniMan Gitee 迷你仓库管理器")
-        self.root.geometry("920x680")
+        self.root.geometry("960x680")
 
         self.main_bg = "#ECEFF4"
         self.card_bg = "#FFFFFF"
@@ -57,7 +59,7 @@ class GiteeTreeManager:
         self.text_color = "#2E3440"
 
         self.root.configure(bg=self.main_bg)
-        self.center_window(920, 680)
+        self.center_window(960, 680)
         self.setup_style()
 
         self.crypto = ConfigCrypto()
@@ -66,6 +68,7 @@ class GiteeTreeManager:
         self.repo = ""
         self.base_api = "https://gitee.com/api/v5"
         self.path_map = {}
+        self.selected_items = set()
         self.read_only_mode = False
         
         self.edit_ext = (
@@ -107,34 +110,39 @@ class GiteeTreeManager:
             "relief": "flat", "bd":0, "padx":10, "pady":4
         }
 
+        self.btn_select_all = tk.Button(frame_tool, text="全选/取消全选", command=self.toggle_select_all, **btn_common)
         self.btn_refresh = tk.Button(frame_tool, text="刷新", command=self.refresh_tree, **btn_common)
         self.btn_create = tk.Button(frame_tool, text="新建文件夹", command=self.create_folder, **btn_common)
         self.btn_upload = tk.Button(frame_tool, text="上传文件", command=self.upload_file, **btn_common)
-        self.btn_download = tk.Button(frame_tool, text="下载选中", command=self.download_file, **btn_common)
-        self.btn_delete = tk.Button(frame_tool, text="删除选中", command=self.delete_file, **btn_common)
+        self.btn_batch_download = tk.Button(frame_tool, text="批量下载(ZIP)", command=self.batch_download_zip, **btn_common)
+        self.btn_batch_delete = tk.Button(frame_tool, text="批量删除", command=self.batch_delete, **btn_common)
         self.btn_edit = tk.Button(frame_tool, text="编辑文件", command=self.open_edit_window, **btn_common)
         self.btn_help = tk.Button(frame_tool, text="使用帮助", command=self.show_help, **btn_common)
 
+        self.btn_select_all.pack(side=tk.LEFT, padx=3)
         self.btn_refresh.pack(side=tk.LEFT, padx=3)
         self.btn_create.pack(side=tk.LEFT, padx=3)
         self.btn_upload.pack(side=tk.LEFT, padx=3)
-        self.btn_download.pack(side=tk.LEFT, padx=3)
+        self.btn_batch_download.pack(side=tk.LEFT, padx=3)
         self.btn_edit.pack(side=tk.LEFT, padx=3)
-        self.btn_delete.pack(side=tk.LEFT, padx=3)
+        self.btn_batch_delete.pack(side=tk.LEFT, padx=3)
         self.btn_help.pack(side=tk.LEFT, padx=3)
 
         frame_tree = tk.Frame(root, bg=self.card_bg, relief="flat", bd=0)
         frame_tree.pack(fill=tk.BOTH, expand=True, padx=12, pady=8)
 
-        self.tree = ttk.Treeview(frame_tree, columns=("size"), show="tree headings", style="Modern.Treeview")
+        self.tree = ttk.Treeview(frame_tree, columns=("select", "size"), show="tree headings", style="Modern.Treeview")
         self.tree.heading("#0", text="名称")
+        self.tree.heading("select", text="选择")
         self.tree.heading("size", text="大小")
-        self.tree.column("#0", width=720)
+        self.tree.column("#0", width=600)
+        self.tree.column("select", width=60, anchor="center")
         self.tree.column("size", width=120)
         self.tree.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
         self.tree.bind("<<TreeviewOpen>>", self.on_folder_open)
         self.tree.bind("<Double-1>", self.on_double_click)
+        self.tree.bind("<Button-1>", self.on_tree_click)
         self.root.after(300, self.auto_load_repo)
 
     # ========== 帮助窗口 ==========
@@ -150,7 +158,7 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
 • 刷新：重新加载仓库文件列表
 • 新建文件夹：在选中目录下创建文件夹
 • 上传文件：支持文本、图片、压缩包等，选中已有文件再上传，默认和选中的文件同路径
-• 下载选中：下载选中的文件到本地
+• 批量下载(ZIP)：下载选中的多个文件为ZIP压缩包
 • 删除选中：删除文件或整个文件夹
 • 编辑文件：支持几乎所有文本格式
 .txt ,  .md ,  .yaml ,  .yml ,  .xml ,  .json ,  .ini ,  .toml ,  .cfg ,  .conf ,
@@ -158,12 +166,18 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
 .py ,  .sh ,  .bat ,  .php ,  .java ,  .c ,  .cpp ,  .h ,  .go ,  .rb ,  .lua ,
 .swift ,  .bas ,  .cls ,  .vba ,  .vbs 
 
-【3】上传限制（重要）
+【3】批量操作
+• 点击"选择"列的复选框可选中/取消单个文件
+• 点击"全选/取消全选"按钮可全选或取消全选当前可见的文件
+• 批量下载：将选中的文件打包为ZIP下载
+• 批量删除：删除选中的文件（需二次确认）
+
+【4】上传限制（重要）
 • 本工具上传单文件建议不超过 10MB
 • 超过容易出现 SSL/网络断开错误
 • exe/二进制大文件建议分卷压缩后上传
 
-【4】权限说明
+【5】权限说明
 • 填写 个人令牌Token：拥有完整读写权限
 • 不填 个人令牌Token：自动进入只读模式
 • 程序旁边默认生成GiteeConfig.json存储记录令牌、仓库路径，程序打开时默认读取，如需保密请自行删除这个文件。
@@ -175,17 +189,19 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
         if self.read_only_mode:
             self.btn_create.config(state=tk.DISABLED)
             self.btn_upload.config(state=tk.DISABLED)
-            self.btn_delete.config(state=tk.DISABLED)
+            self.btn_batch_delete.config(state=tk.DISABLED)
             self.btn_edit.config(state=tk.DISABLED)
-            self.btn_download.config(state=tk.NORMAL)
+            self.btn_batch_download.config(state=tk.NORMAL)
+            self.btn_select_all.config(state=tk.NORMAL)
             self.btn_refresh.config(state=tk.NORMAL)
             self.btn_help.config(state=tk.NORMAL)
         else:
             self.btn_create.config(state=tk.NORMAL)
             self.btn_upload.config(state=tk.NORMAL)
-            self.btn_download.config(state=tk.NORMAL)
+            self.btn_batch_download.config(state=tk.NORMAL)
             self.btn_edit.config(state=tk.NORMAL)
-            self.btn_delete.config(state=tk.NORMAL)
+            self.btn_batch_delete.config(state=tk.NORMAL)
+            self.btn_select_all.config(state=tk.NORMAL)
             self.btn_refresh.config(state=tk.NORMAL)
             self.btn_help.config(state=tk.NORMAL)
 
@@ -209,7 +225,12 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
         patterns = [r"gitee\.com/([^/]+)/([^/?#]+)", r"gitee\.com/api/v5/repos/([^/]+)/([^/]+)"]
         for p in patterns:
             match = re.search(p, url)
-            if match: return match.group(1), match.group(2)
+            if match:
+                owner = match.group(1)
+                repo = match.group(2)
+                if repo.endswith(".git"):
+                    repo = repo[:-4]
+                return owner, repo
         return None, None
 
     def load_repo(self):
@@ -237,6 +258,7 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
         for item in self.tree.get_children():
             self.tree.delete(item)
         self.path_map.clear()
+        self.selected_items.clear()
         self.load_dir("", "")
 
     def load_dir(self, parent_node, path):
@@ -253,10 +275,20 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
                 typ = item["type"]
                 size = item.get("size", 0)
                 full_path = os.path.join(path, name).replace("\\", "/")
-                node = self.tree.insert(parent_node, "end", text=name, values=(f"{size} B"))
+                node = self.tree.insert(parent_node, "end", text=name, values=("☐", f"{size} B"))
                 self.path_map[node] = (full_path, typ)
                 if typ == "dir": self.tree.insert(node, "end")
-        except Exception as e: pass
+        except Exception as e:
+            if parent_node == "":
+                error_msg = str(e)
+                try:
+                    if hasattr(e, 'response') and e.response is not None:
+                        error_detail = e.response.json()
+                        if isinstance(error_detail, dict):
+                            error_msg = error_detail.get('message', error_msg)
+                except:
+                    pass
+                messagebox.showerror("加载失败", f"无法加载仓库内容：\n{error_msg}")
 
     def on_folder_open(self, event):
         node = self.tree.focus()
@@ -272,6 +304,52 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
         path, typ = self.path_map[item[0]]
         if typ == "file" and path.lower().endswith(self.edit_ext):
             self.open_edit_window()
+
+    def on_tree_click(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        if region == "cell":
+            column = self.tree.identify_column(event.x)
+            if column == "#1":
+                item = self.tree.identify_row(event.y)
+                if item and item in self.path_map:
+                    self.toggle_item_selection(item)
+
+    def toggle_item_selection(self, item):
+        if item in self.selected_items:
+            self.selected_items.remove(item)
+            self.tree.set(item, "select", "☐")
+        else:
+            self.selected_items.add(item)
+            self.tree.set(item, "select", "☑")
+
+    def get_all_visible_files(self):
+        files = []
+        def collect(parent):
+            for item in self.tree.get_children(parent):
+                if item in self.path_map:
+                    path, typ = self.path_map[item]
+                    if typ == "file":
+                        files.append(item)
+                    if typ == "dir" and self.tree.item(item, "open"):
+                        collect(item)
+        collect("")
+        return files
+
+    def toggle_select_all(self):
+        visible_files = self.get_all_visible_files()
+        if not visible_files:
+            return
+        
+        all_selected = all(item in self.selected_items for item in visible_files)
+        
+        for item in visible_files:
+            if all_selected:
+                if item in self.selected_items:
+                    self.selected_items.remove(item)
+                self.tree.set(item, "select", "☐")
+            else:
+                self.selected_items.add(item)
+                self.tree.set(item, "select", "☑")
 
     def get_selected(self):
         item = self.tree.selection()
@@ -390,30 +468,100 @@ Gitee 迷你仓库管理器GiteeMiniMan 使用帮助
         except Exception as e:
             messagebox.showerror("失败", str(e))
 
-    # ====================== 下载 ======================
-    def download_file(self):
-        sel = self.get_selected()
-        if not sel:
-            messagebox.showinfo("提示", "请选择文件")
+    # ====================== 批量下载为ZIP ======================
+    def batch_download_zip(self):
+        selected_files = []
+        for item in self.selected_items:
+            if item in self.path_map:
+                path, typ = self.path_map[item]
+                if typ == "file":
+                    selected_files.append(path)
+        
+        if not selected_files:
+            messagebox.showinfo("提示", "请先勾选要下载的文件")
             return
-        p, t = sel
-        if t == "dir":
-            messagebox.showwarning("提示", "不能下载目录")
-            return
-        try:
-            u = f"{self.base_api}/repos/{self.owner}/{self.repo}/contents/{p}"
-            params = {"access_token": self.token} if self.token else {}
-            data = requests.get(u, params=params, timeout=15).json()
-            raw = base64.b64decode(data["content"])
-            save = filedialog.asksaveasfilename(initialfile=os.path.basename(p))
-            if save:
-                with open(save, "wb") as f:
-                    f.write(raw)
-                messagebox.showinfo("成功", "下载完成")
-        except Exception as e:
-            messagebox.showerror("失败", str(e))
 
-    # ====================== 删除 ======================
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("ZIP文件", "*.zip")],
+            initialfile=f"{self.repo}_files.zip"
+        )
+        
+        if not save_path:
+            return
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                with zipfile.ZipFile(save_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    success_count = 0
+                    for file_path in selected_files:
+                        try:
+                            url = f"{self.base_api}/repos/{self.owner}/{self.repo}/contents/{file_path}"
+                            params = {"access_token": self.token} if self.token else {}
+                            data = requests.get(url, params=params, timeout=15).json()
+                            raw = base64.b64decode(data["content"])
+                            
+                            filename = os.path.basename(file_path)
+                            temp_file = os.path.join(temp_dir, filename)
+                            with open(temp_file, "wb") as f:
+                                f.write(raw)
+                            
+                            zipf.write(temp_file, file_path)
+                            success_count += 1
+                        except Exception as e:
+                            print(f"下载 {file_path} 失败: {e}")
+                            continue
+                    
+                    if success_count > 0:
+                        messagebox.showinfo("成功", f"已下载 {success_count} 个文件到：\n{save_path}")
+                    else:
+                        messagebox.showwarning("警告", "没有文件成功下载")
+        except Exception as e:
+            messagebox.showerror("失败", f"创建ZIP文件失败：{str(e)}")
+
+    # ====================== 批量删除 ======================
+    def batch_delete(self):
+        if self.read_only_mode:
+            messagebox.showwarning("只读", "只读模式无法删除")
+            return
+        
+        selected_files = []
+        for item in self.selected_items:
+            if item in self.path_map:
+                path, typ = self.path_map[item]
+                if typ == "file":
+                    selected_files.append(path)
+        
+        if not selected_files:
+            messagebox.showinfo("提示", "请先勾选要删除的文件")
+            return
+
+        file_list = "\n".join([f"  - {f}" for f in selected_files[:10]])
+        if len(selected_files) > 10:
+            file_list += f"\n  ... 还有 {len(selected_files) - 10} 个文件"
+        
+        if not messagebox.askyesno("确认删除", f"确定要删除以下 {len(selected_files)} 个文件吗？\n\n{file_list}\n\n此操作不可撤销！"):
+            return
+
+        success_count = 0
+        fail_count = 0
+        for file_path in selected_files:
+            try:
+                u = f"{self.base_api}/repos/{self.owner}/{self.repo}/contents/{file_path}"
+                sha = requests.get(u, params={"access_token": self.token}).json()["sha"]
+                requests.delete(u, json={"access_token": self.token, "message": "del", "sha": sha})
+                success_count += 1
+            except:
+                fail_count += 1
+        
+        self.refresh_tree()
+        
+        if fail_count == 0:
+            messagebox.showinfo("完成", f"已成功删除 {success_count} 个文件")
+        else:
+            messagebox.showwarning("完成", f"删除完成：成功 {success_count} 个，失败 {fail_count} 个")
+
+    # ====================== 删除（单个） ======================
     def delete_file(self):
         if self.read_only_mode:
             messagebox.showwarning("只读", "无法删除")
